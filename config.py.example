@@ -1,0 +1,21 @@
+"""
+Settings for the standalone Google Photos uploader.
+
+Copy this file to config.py and fill in the values. config.py is gitignored
+because it holds secrets.
+
+Only ANDROID_CREDS is required for uploading. WORKER_BASE / SHORTEN_SECRET are
+needed only for `up.py --links` (public download links via the Worker).
+"""
+
+import os
+
+# gpmc auth_data for the target account.
+# Generate it with:  uv run get_auth_data.py "<oauth_token>"
+# (or set the GP_AUTH_DATA environment variable instead).
+ANDROID_CREDS = os.getenv("GP_AUTH_DATA", "")   # TODO: paste your auth_data string
+
+# ── Cloudflare Worker download proxy (worker/) ──────────────────────
+# After you deploy worker/, set these (or use env vars of the same name).
+WORKER_BASE = os.getenv("WORKER_BASE", "")            # e.g. https://gphotos-proxy.<you>.workers.dev
+SHORTEN_SECRET = os.getenv("SHORTEN_SECRET", "")      # must match the Worker's secret

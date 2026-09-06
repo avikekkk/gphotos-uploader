@@ -1,0 +1,14 @@
+name = "gphotos-proxy"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+
+# KV namespace for id -> remote_url mappings and the cached bearer token.
+# Create it with:  wrangler kv namespace create LINKS
+# then paste the returned id below.
+[[kv_namespaces]]
+binding = "LINKS"
+id = "77f403a880f44a3dbea20fe5ae2f0112"
+
+# Secrets are NOT set here. Set them once with:
+#   wrangler secret put GP_AUTH_DATA     (paste your gpmc auth_data string)
+#   wrangler secret put SHORTEN_SECRET   (choose any strong string)

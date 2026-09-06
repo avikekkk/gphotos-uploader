@@ -1,0 +1,11 @@
+# secrets / local state - never commit
+config.py
+*.pyc
+__pycache__/
+worker/.wrangler/
+worker/.dev.vars
+node_modules/
+
+# sample media (large / not ours)
+example-files-upload/
+uploads.txt
