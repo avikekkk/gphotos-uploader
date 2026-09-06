@@ -69,7 +69,11 @@ async function handleShorten(request, env) {
     return json({ error: "missing url" }, 400);
   }
   const id = randomId();
-  const record = JSON.stringify({ url: body.url, filename: body.filename || "" });
+  const record = JSON.stringify({
+    url: body.url,
+    filename: body.filename || "",
+    suffix: typeof body.suffix === "string" ? body.suffix : "",
+  });
   const opts = {};
   if (body.ttl && Number.isFinite(body.ttl)) opts.expirationTtl = Math.max(60, body.ttl);
   await env.LINKS.put("l:" + id, record, opts);
@@ -85,7 +89,9 @@ async function handleDownload(request, env, path) {
   }
 
   const filename = decodeURIComponent(parts.slice(1).join("/")) || record.filename || id;
-  const src = record.url.includes("=") ? record.url : record.url + "=d";
+  // suffix picks the download variant: =d for photos, =dv for videos.
+  const suffix = record.suffix || (record.url.includes("=") ? "" : "=d");
+  const src = record.url + suffix;
 
   let resp = await fetchAuthed(env, src, request, false);
   // If the cached token was stale, mint a fresh one and retry once.

@@ -163,21 +163,21 @@ def worker_link(client, media_key: str, email: str, filename: str) -> str | None
         warn("Links skipped: set WORKER_BASE and SHORTEN_SECRET in config.py.")
         return None
 
-    # gpmc caches the library (media_key -> remote_url) in a local SQLite DB.
+    # gpmc caches the library (media_key -> remote_url, type) in a local SQLite DB.
     db = Path.home() / ".gpmc" / email / "storage.db"
-    remote_url = None
+    remote_url, mtype = None, None
     for attempt in (1, 2):
         if db.exists():
             con = sqlite3.connect(db)
             try:
                 row = con.execute(
-                    "SELECT remote_url FROM remote_media WHERE media_key=?",
+                    "SELECT remote_url, type FROM remote_media WHERE media_key=?",
                     (media_key,),
                 ).fetchone()
             finally:
                 con.close()
             if row and row[0]:
-                remote_url = row[0]
+                remote_url, mtype = row[0], row[1]
                 break
         if attempt == 1:
             try:
@@ -188,10 +188,14 @@ def worker_link(client, media_key: str, email: str, filename: str) -> str | None
         warn("Links skipped: could not resolve the item's remote URL yet.")
         return None
 
+    # Google serves videos with =dv and photos with =d. type 2 == video.
+    suffix = "=dv" if mtype == 2 else "=d"
+
     try:
         r = requests.post(
             f"{base}/shorten",
-            json={"url": remote_url, "secret": secret, "filename": filename},
+            json={"url": remote_url, "suffix": suffix,
+                  "secret": secret, "filename": filename},
             timeout=20,
         )
         if r.status_code != 200:
