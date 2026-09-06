@@ -136,16 +136,20 @@ def collect_targets(files: list[str], directory: str | None) -> list[str]:
     return unique
 
 
-def media_key_of(result, path: str) -> str | None:
-    """gpmc upload() returns {abs_path: media_key}; be tolerant of shapes."""
-    if isinstance(result, dict):
-        if path in result:
-            return str(result[path])
-        for v in result.values():
-            if isinstance(v, str):
-                return v
-    if isinstance(result, str):
-        return result
+def _key_for_path(result, path: str) -> str | None:
+    """Look up one file's media key in gpmc's {path: media_key} batch result.
+
+    Keys may be str or Path and may differ in normalization, so match on the
+    resolved absolute path.
+    """
+    if not isinstance(result, dict):
+        return None
+    if path in result:
+        return str(result[path])
+    want = os.path.realpath(path)
+    for k, v in result.items():
+        if os.path.realpath(str(k)) == want:
+            return str(v)
     return None
 
 
@@ -261,35 +265,40 @@ def main() -> None:
     info(f"Threads : {args.threads}")
     print("-" * 60)
 
+    # Upload the whole batch in a single call so gpmc shows one combined
+    # progress bar for all files instead of one bar per file.
+    email = account_email(auth)
+    try:
+        result = client.upload(
+            target=targets,
+            show_progress=not args.no_progress,
+            threads=args.threads,
+        )
+    except Exception as e:
+        die(f"Upload failed: {e}")
+
+    # gpmc's progress bar leaves the cursor mid-line; break to a fresh line.
+    if not args.no_progress:
+        print()
+    print("-" * 60)
+
     ok_count = 0
     fail_count = 0
     for idx, path in enumerate(targets, 1):
         name = os.path.basename(path)
-        size = format_bytes(os.path.getsize(path))
-        print(f"[{idx}/{total}] {name} ({size})")
-        try:
-            result = client.upload(
-                target=path,
-                show_progress=not args.no_progress,
-                threads=args.threads,
-            )
-            key = media_key_of(result, path)
-            if not key:
-                raise RuntimeError(f"no media key returned: {result!r}")
-
-            gp_url = f"https://photos.google.com/photo/{key}"
-            print(f"        photos : {gp_url}")
-
-            if args.links:
-                dl = worker_link(client, key, account_email(auth), name)
-                if dl:
-                    print(f"        link   : {dl}")
-
-            ok_count += 1
-        except Exception as e:
-            fail(f"{name}: {e}")
+        key = _key_for_path(result, path)
+        if not key:
+            fail(f"{name}: no media key returned")
             fail_count += 1
-        print()
+            continue
+
+        print(f"[{idx}/{total}] {name}")
+        print(f"        photos : https://photos.google.com/photo/{key}")
+        if args.links:
+            dl = worker_link(client, key, email, name)
+            if dl:
+                print(f"        link   : {dl}")
+        ok_count += 1
 
     print("-" * 60)
     info(f"Done. {ok_count} uploaded, {fail_count} failed.")
