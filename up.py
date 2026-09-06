@@ -34,9 +34,19 @@ from urllib.parse import parse_qsl, quote
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+# Formats Google Photos accepts, mirroring gotohp's allowlist
+# (github.com/xob0t/gotohp, backend/upload.go). Anything else Google rejects.
 MEDIA_EXTS = {
-    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".heic",
-    ".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".3gp", ".mpg", ".mpeg",
+    # photos
+    ".avif", ".bmp", ".gif", ".heic", ".heif", ".ico", ".jpg", ".jpeg",
+    ".png", ".tif", ".tiff", ".webp",
+    # raw photos
+    ".cr2", ".cr3", ".nef", ".arw", ".orf", ".raf", ".rw2", ".pef",
+    ".sr2", ".dng",
+    # videos
+    ".3gp", ".3g2", ".asf", ".avi", ".divx", ".m2t", ".m2ts", ".m4v",
+    ".mkv", ".mmv", ".mod", ".mov", ".mp4", ".mpg", ".mpeg", ".mts",
+    ".tod", ".wmv", ".ts", ".webm",
 }
 
 
