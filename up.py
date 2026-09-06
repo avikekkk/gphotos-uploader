@@ -12,7 +12,7 @@ Standalone Google Photos uploader.
     uv run up.py --file video.mp4
     uv run up.py video.mp4                 # positional works too
     uv run up.py a.mp4 b.jpg c.mkv         # several files
-    uv run up.py --dir ./clips             # every media file in a folder
+    uv run up.py --dir ./clips             # every media file in a folder (recursive)
     uv run up.py --file video.mp4 --links  # also create a public download link (Worker)
 
 (Plain `python up.py ...` works too if gpmc is already installed.)
@@ -119,10 +119,13 @@ def collect_targets(files: list[str], directory: str | None) -> list[str]:
     if directory:
         if not os.path.isdir(directory):
             die(f"Not a directory: {directory}")
-        for name in sorted(os.listdir(directory)):
-            p = os.path.join(directory, name)
-            if os.path.isfile(p) and os.path.splitext(name)[1].lower() in MEDIA_EXTS:
-                targets.append(os.path.abspath(p))
+        # Walk the whole tree so nested subfolders are included.
+        for root, dirs, names in os.walk(directory):
+            dirs.sort()
+            for name in sorted(names):
+                p = os.path.join(root, name)
+                if os.path.isfile(p) and os.path.splitext(name)[1].lower() in MEDIA_EXTS:
+                    targets.append(os.path.abspath(p))
     # de-duplicate, preserve order
     seen: set[str] = set()
     unique = []
@@ -229,7 +232,8 @@ def main() -> None:
     ap.add_argument("files", nargs="*", help="file(s) to upload")
     ap.add_argument("--file", action="append", default=[], metavar="PATH",
                     help="a file to upload (repeatable)")
-    ap.add_argument("--dir", metavar="DIR", help="upload every media file in this folder")
+    ap.add_argument("--dir", metavar="DIR",
+                    help="upload every media file in this folder, recursively")
     ap.add_argument("--auth", metavar="STR", help="gpmc auth_data string (overrides env/config)")
     ap.add_argument("--threads", type=int, default=4, help="parallel upload threads (default: 4)")
     ap.add_argument("--no-progress", action="store_true", help="hide the gpmc progress bar")
