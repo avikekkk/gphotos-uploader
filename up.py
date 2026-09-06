@@ -13,6 +13,7 @@ Standalone Google Photos uploader.
     uv run up.py video.mp4                 # positional works too
     uv run up.py a.mp4 b.jpg c.mkv         # several files
     uv run up.py --dir ./clips             # every media file in a folder (recursive)
+    uv run up.py --dir ./trip --album Trip # group the uploads into an album
     uv run up.py --file video.mp4 --links  # also create a public download link (Worker)
 
 (Plain `python up.py ...` works too if gpmc is already installed.)
@@ -239,6 +240,9 @@ def main() -> None:
     ap.add_argument("--dir", metavar="DIR",
                     help="upload every media file in this folder, recursively")
     ap.add_argument("--auth", metavar="STR", help="gpmc auth_data string (overrides env/config)")
+    ap.add_argument("--album", metavar="NAME",
+                    help='add uploads to a Google Photos album named NAME '
+                         '(use "AUTO" to make one album per parent folder)')
     ap.add_argument("--threads", type=int, default=4, help="parallel upload threads (default: 4)")
     ap.add_argument("--no-progress", action="store_true", help="hide the gpmc progress bar")
     ap.add_argument("--links", action="store_true",
@@ -263,6 +267,8 @@ def main() -> None:
     info(f"Account : {account_email(auth)}")
     info(f"Files   : {total} ({format_bytes(total_bytes)})")
     info(f"Threads : {args.threads}")
+    if args.album:
+        info(f"Album   : {args.album}")
     print("-" * 60)
 
     # Upload the whole batch in a single call so gpmc shows one combined
@@ -271,6 +277,7 @@ def main() -> None:
     try:
         result = client.upload(
             target=targets,
+            album_name=args.album,
             show_progress=not args.no_progress,
             threads=args.threads,
         )
