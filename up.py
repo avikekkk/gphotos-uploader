@@ -14,6 +14,7 @@ Standalone Google Photos uploader.
     uv run up.py a.mp4 b.jpg c.mkv         # several files
     uv run up.py --dir ./clips             # every media file in a folder (recursive)
     uv run up.py --dir ./trip --album Trip # group the uploads into an album
+    uv run up.py --dir ./s01 --share-album "Show S01"  # one public album link
     uv run up.py --file video.mp4 --links  # also create a public download link (Worker)
     uv run up.py --file video.mp4 --ddl    # also print Google's direct link (expires)
 
@@ -166,14 +167,54 @@ def _cfg(name: str, env: str) -> str:
         return ""
 
 
+def resolve_item(client, media_key: str, email: str) -> dict | None:
+    """Look up an uploaded item's Google remote URL, download suffix and size.
+
+    gpmc caches the library (media_key -> remote_url, type, size) in a local
+    SQLite DB. Syncs the cache once if the row isn't there yet. Returns
+    {"remote_url", "suffix", "type", "size"} or None if it can't be resolved.
+    """
+    import sqlite3
+    from pathlib import Path
+
+    db = Path.home() / ".gpmc" / email / "storage.db"
+    remote_url, mtype, size = None, None, None
+    for attempt in (1, 2):
+        if db.exists():
+            con = sqlite3.connect(db)
+            try:
+                row = con.execute(
+                    "SELECT remote_url, type, size_bytes FROM remote_media "
+                    "WHERE media_key=?",
+                    (media_key,),
+                ).fetchone()
+            finally:
+                con.close()
+            if row and row[0]:
+                remote_url, mtype, size = row[0], row[1], row[2]
+                break
+        if attempt == 1:
+            try:
+                client.update_cache(show_progress=False)  # pick up the new item
+            except Exception:
+                pass
+    if not remote_url:
+        return None
+    # Google serves videos with =dv and photos with =d. type 2 == video.
+    return {
+        "remote_url": remote_url,
+        "suffix": "=dv" if mtype == 2 else "=d",
+        "type": mtype,
+        "size": size,
+    }
+
+
 def worker_link(client, media_key: str, email: str, filename: str) -> str | None:
-    """Resolve the upload's Google remote URL and register it with the Worker.
+    """Resolve an upload's remote URL and register it with the Worker.
 
     Returns a clean public download link, or None if the Worker isn't
     configured or the remote URL can't be found.
     """
-    import sqlite3
-    from pathlib import Path
     import requests
 
     base = _cfg("WORKER_BASE", "WORKER_BASE").rstrip("/")
@@ -182,38 +223,15 @@ def worker_link(client, media_key: str, email: str, filename: str) -> str | None
         warn("Links skipped: set WORKER_BASE and SHORTEN_SECRET in config.py.")
         return None
 
-    # gpmc caches the library (media_key -> remote_url, type) in a local SQLite DB.
-    db = Path.home() / ".gpmc" / email / "storage.db"
-    remote_url, mtype = None, None
-    for attempt in (1, 2):
-        if db.exists():
-            con = sqlite3.connect(db)
-            try:
-                row = con.execute(
-                    "SELECT remote_url, type FROM remote_media WHERE media_key=?",
-                    (media_key,),
-                ).fetchone()
-            finally:
-                con.close()
-            if row and row[0]:
-                remote_url, mtype = row[0], row[1]
-                break
-        if attempt == 1:
-            try:
-                client.update_cache(show_progress=False)  # pick up the new item
-            except Exception:
-                pass
-    if not remote_url:
+    item = resolve_item(client, media_key, email)
+    if not item:
         warn("Links skipped: could not resolve the item's remote URL yet.")
         return None
-
-    # Google serves videos with =dv and photos with =d. type 2 == video.
-    suffix = "=dv" if mtype == 2 else "=d"
 
     try:
         r = requests.post(
             f"{base}/shorten",
-            json={"url": remote_url, "suffix": suffix,
+            json={"url": item["remote_url"], "suffix": item["suffix"],
                   "secret": secret, "filename": filename},
             timeout=20,
         )
@@ -228,6 +246,56 @@ def worker_link(client, media_key: str, email: str, filename: str) -> str | None
         warn("Worker did not return a link id.")
         return None
     return f"{base}/{sid}/{quote(filename)}"
+
+
+def worker_album(client, name: str, entries: list[tuple[str, str]], email: str) -> str | None:
+    """Register a batch of uploads as one Worker album and return its page URL.
+
+    `entries` is a list of (media_key, filename). Returns the album URL, or
+    None if the Worker isn't configured or no items could be resolved.
+    """
+    import requests
+
+    base = _cfg("WORKER_BASE", "WORKER_BASE").rstrip("/")
+    secret = _cfg("SHORTEN_SECRET", "SHORTEN_SECRET")
+    if not base or not secret:
+        warn("Album skipped: set WORKER_BASE and SHORTEN_SECRET in config.py.")
+        return None
+
+    items = []
+    for media_key, filename in entries:
+        it = resolve_item(client, media_key, email)
+        if not it:
+            warn(f"Album: skipping unresolved item {filename}")
+            continue
+        items.append({
+            "url": it["remote_url"],
+            "suffix": it["suffix"],
+            "filename": filename,
+            "type": it["type"],
+            "size": it["size"],
+        })
+    if not items:
+        warn("Album skipped: no items could be resolved.")
+        return None
+
+    try:
+        r = requests.post(
+            f"{base}/album",
+            json={"name": name, "items": items, "secret": secret},
+            timeout=30,
+        )
+        if r.status_code != 200:
+            warn(f"Worker /album returned HTTP {r.status_code}.")
+            return None
+        aid = r.json().get("id")
+    except Exception as e:
+        warn(f"Worker request failed: {e}")
+        return None
+    if not aid:
+        warn("Worker did not return an album id.")
+        return None
+    return f"{base}/a/{aid}"
 
 
 def google_ddl(client, media_key: str) -> str | None:
@@ -270,6 +338,9 @@ def main() -> None:
     ap.add_argument("--album", metavar="NAME",
                     help='add uploads to a Google Photos album named NAME '
                          '(use "AUTO" to make one album per parent folder)')
+    ap.add_argument("--share-album", metavar="NAME", dest="share_album",
+                    help="create one public, download-only album page (Worker) for "
+                         "the whole batch and print its shareable link")
     ap.add_argument("--threads", type=int, default=4, help="parallel upload threads (default: 4)")
     ap.add_argument("--no-progress", action="store_true", help="hide the gpmc progress bar")
     ap.add_argument("--links", action="store_true",
@@ -296,8 +367,10 @@ def main() -> None:
     info(f"Account : {account_email(auth)}")
     info(f"Files   : {total} ({format_bytes(total_bytes)})")
     info(f"Threads : {args.threads}")
-    if args.album:
-        info(f"Album   : {args.album}")
+    # --share-album also creates the Google Photos album of the same name.
+    gp_album = args.album or args.share_album
+    if gp_album:
+        info(f"Album   : {gp_album}")
     print("-" * 60)
 
     # Upload the whole batch in a single call so gpmc shows one combined
@@ -306,7 +379,7 @@ def main() -> None:
     try:
         result = client.upload(
             target=targets,
-            album_name=args.album,
+            album_name=gp_album,
             show_progress=not args.no_progress,
             threads=args.threads,
         )
@@ -320,6 +393,7 @@ def main() -> None:
 
     ok_count = 0
     fail_count = 0
+    album_entries: list[tuple[str, str]] = []  # (media_key, filename) for --share-album
     for idx, path in enumerate(targets, 1):
         name = os.path.basename(path)
         key = _key_for_path(result, path)
@@ -338,9 +412,16 @@ def main() -> None:
             g = google_ddl(client, key)
             if g:
                 print(f"        ddl    : {g}")
+        album_entries.append((key, name))
         ok_count += 1
 
     print("-" * 60)
+    if args.share_album and album_entries:
+        url = worker_album(client, args.share_album, album_entries, email)
+        if url:
+            info(f'Album "{args.share_album}" ({len(album_entries)} files):')
+            print(f"    {url}")
+            print("-" * 60)
     info(f"Done. {ok_count} uploaded, {fail_count} failed.")
     sys.exit(1 if fail_count else 0)
 

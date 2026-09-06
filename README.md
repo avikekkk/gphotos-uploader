@@ -52,6 +52,28 @@ credential and streams the file over a public `workers.dev` URL.
    ```
    The `link` is downloadable by anyone, no Google login.
 
+## Share a whole season/collection (one album link)
+
+Handing out one `--links` URL per episode is tedious. `--share-album NAME`
+uploads the batch and prints a **single public link** to a download-only portal
+page that lists every file with its own Download button (plus "Download all"):
+
+```bash
+uv run up.py --dir ./show-s01 --share-album "Show S01"
+```
+
+Output ends with:
+
+```
+[*] Album "Show S01" (10 files):
+    https://gphotos-proxy.<you>.workers.dev/a/ab12cd
+```
+
+Anyone with that link sees the list and can download each file (streamed from
+Google, no login). `--share-album` also creates a Google Photos album of the
+same name. It's download-only - no in-browser player - and needs the Worker
+deployed, same as `--links`.
+
 ## Auth
 
 Already set in `config.py`. To use another account, regenerate it:

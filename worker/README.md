@@ -12,6 +12,10 @@ a Google bearer token itself, and streams the original bytes over a public
 - `POST /shorten` `{ "url": "<remote_url>", "secret": "<SHORTEN_SECRET>", "filename": "name.ext" }`
   -> `{ "id": "<shortid>" }`  (called by `up.py --links`)
 - `GET /<id>/<filename>` -> streams the file as a download.
+- `POST /album` `{ "name": "Show S01", "secret": "<SHORTEN_SECRET>", "items": [{ "url", "suffix", "filename", "type", "size" }] }`
+  -> `{ "id": "<albumid>" }`  (called by `up.py --share-album`)
+- `GET /a/<id>` -> HTML portal page listing every item (download-only).
+- `GET /a/<id>/<index>/<filename>` -> streams that item as a download.
 
 ## Deploy (one time, ~5 minutes)
 
@@ -73,7 +77,8 @@ Paste that string when `wrangler secret put GP_AUTH_DATA` prompts.
   expiry or a 403, so downloads keep working without per-request auth calls.
 - `GP_AUTH_DATA` in the Worker is full access to that Google account. Keep it a
   Worker secret; never put it in `wrangler.toml`.
-- Anyone with a `/<id>/<filename>` link can download that one item. The ids are
+- Anyone with a `/<id>/<filename>` link can download that one item, and anyone
+  with a `/a/<id>` link can list and download that whole album. The ids are
   random and unguessable. Rotate `SHORTEN_SECRET` to cut off new link creation.
 - Local test (optional): create `worker/.dev.vars` with `GP_AUTH_DATA=...` and
   `SHORTEN_SECRET=...`, then `npx wrangler dev --local`. `.dev.vars` is
