@@ -15,6 +15,7 @@ Standalone Google Photos uploader.
     uv run up.py --dir ./clips             # every media file in a folder (recursive)
     uv run up.py --dir ./trip --album Trip # group the uploads into an album
     uv run up.py --file video.mp4 --links  # also create a public download link (Worker)
+    uv run up.py --file video.mp4 --ddl    # also print Google's direct link (expires)
 
 (Plain `python up.py ...` works too if gpmc is already installed.)
 
@@ -229,6 +230,32 @@ def worker_link(client, media_key: str, email: str, filename: str) -> str | None
     return f"{base}/{sid}/{quote(filename)}"
 
 
+def google_ddl(client, media_key: str) -> str | None:
+    """Google's own temporary direct-download URL for an item.
+
+    Streams the original file straight from Google's CDN with no auth (the
+    token is in the URL), already tagged Content-Disposition: attachment.
+    The link EXPIRES after a few hours, unlike the Worker link.
+    """
+    try:
+        d = client.api.get_download_urls(media_key)
+    except Exception as e:
+        warn(f"DDL skipped: {e}")
+        return None
+    # ["1"]["5"]["2"]["6"] = original file, ["5"] = edited version (if any).
+    node = d
+    for k in ("1", "5", "2"):
+        node = node.get(k) if isinstance(node, dict) else None
+    if not isinstance(node, dict):
+        warn("DDL skipped: unexpected response shape.")
+        return None
+    url = node.get("6") or node.get("5")
+    if not url:
+        warn("DDL skipped: no download URL in response.")
+        return None
+    return url
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         prog="up.py",
@@ -246,7 +273,9 @@ def main() -> None:
     ap.add_argument("--threads", type=int, default=4, help="parallel upload threads (default: 4)")
     ap.add_argument("--no-progress", action="store_true", help="hide the gpmc progress bar")
     ap.add_argument("--links", action="store_true",
-                    help="also create a public download link via the Cloudflare Worker")
+                    help="also create a permanent public download link via the Cloudflare Worker")
+    ap.add_argument("--ddl", action="store_true",
+                    help="also print Google's direct-download link (fast, but expires in hours)")
     args = ap.parse_args()
 
     targets = collect_targets(args.files + args.file, args.dir)
@@ -305,6 +334,10 @@ def main() -> None:
             dl = worker_link(client, key, email, name)
             if dl:
                 print(f"        link   : {dl}")
+        if args.ddl:
+            g = google_ddl(client, key)
+            if g:
+                print(f"        ddl    : {g}")
         ok_count += 1
 
     print("-" * 60)
